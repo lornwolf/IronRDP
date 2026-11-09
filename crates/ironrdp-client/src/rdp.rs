@@ -1136,6 +1136,22 @@ impl ResizeQueue {
         self.in_flight = None;
     }
 
+    /// Completes the in-flight request when the desktop now has the size it asked for.
+    ///
+    /// A server with the graphics pipeline applies a Display Control resize with a
+    /// `ResetGraphics` PDU and no Deactivation-Reactivation Sequence, so the image
+    /// taking the requested size is the only sign that the request went through.
+    fn complete_if_applied(&mut self, width: u16, height: u16) -> bool {
+        let applied = self
+            .in_flight
+            .as_ref()
+            .is_some_and(|in_flight| in_flight.request.width == width && in_flight.request.height == height);
+        if applied {
+            self.in_flight = None;
+        }
+        applied
+    }
+
     fn timed_out_request(&self, now: tokio::time::Instant) -> Option<(ResizeRequest, DisplayResizeFallbackReason)> {
         if let Some(in_flight) = self.in_flight.as_ref()
             && now >= in_flight.deadline
@@ -5436,6 +5452,12 @@ async fn active_session(
                         NonZeroU16::new(image.width()).ok_or_else(|| ironrdp_session::general_err!("width is zero"))?;
                     let height = NonZeroU16::new(image.height())
                         .ok_or_else(|| ironrdp_session::general_err!("height is zero"))?;
+                    if resize_queue.complete_if_applied(width.get(), height.get()) {
+                        debug!(
+                            width,
+                            height, "Display Control resize applied by the server without a Deactivation-Reactivation Sequence"
+                        );
+                    }
                     if desktop_update_enabled {
                         if desktop_damage_delivered {
                             continue;
