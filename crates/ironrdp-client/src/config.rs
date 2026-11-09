@@ -545,6 +545,17 @@ pub struct ChannelConfig {
     ///
     /// [MS-RDPEGFX]: https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-rdpegfx/da5c75f9-cd99-450c-98c4-014a496942b0
     pub egfx_persistent_cache: Option<PathBuf>,
+    /// Advertise `RDPGFX_CAPS_FLAG_AVC_THINCLIENT` in the graphics pipeline capability sets
+    /// from version 10.3 up ([MS-RDPEGFX] 2.2.3.6): the client prefers AVC444 for everything,
+    /// so a Windows server encodes the whole desktop as H.264 instead of only the regions it
+    /// classifies as video. Meant for clients whose H.264 decoding is cheaper than painting
+    /// the other codecs. The server may still ignore the preference. Requires an H.264
+    /// decoder that returns YUV planes, since the sets carrying the flag imply AVC444.
+    ///
+    /// Defaults to `false`.
+    ///
+    /// [MS-RDPEGFX]: https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-rdpegfx/fef125c5-60be-43af-8ad1-2158761f4b32
+    pub egfx_avc_thin_client: bool,
 }
 
 impl Default for ChannelConfig {
@@ -598,6 +609,7 @@ impl Default for ChannelConfig {
             pnp: None,
             h264_decoder: crate::h264::H264DecoderFactory::platform_default(),
             egfx_persistent_cache: None,
+            egfx_avc_thin_client: false,
         }
     }
 }
@@ -1674,6 +1686,17 @@ impl ConfigBuilder {
     #[must_use]
     pub fn with_egfx_persistent_cache(mut self, path: Option<PathBuf>) -> Self {
         self.channels.egfx_persistent_cache = path;
+        self
+    }
+
+    /// Ask the server to encode the whole desktop as H.264 (AVC444) rather than only the
+    /// regions it classifies as video, by advertising the thin client preference in the
+    /// graphics pipeline capability sets.
+    ///
+    /// See [`ChannelConfig::egfx_avc_thin_client`].
+    #[must_use]
+    pub fn with_egfx_avc_thin_client(mut self, enabled: bool) -> Self {
+        self.channels.egfx_avc_thin_client = enabled;
         self
     }
 

@@ -29,6 +29,7 @@ use ironrdp_dvc::DvcMessageBatch;
 use ironrdp_dvc::pdu::SoftSyncTunnelType;
 use ironrdp_echo::client::EchoClient;
 use ironrdp_egfx::client::{GraphicsPipelineClient, GraphicsPipelineHandler};
+use ironrdp_egfx::pdu::{CapabilitiesV103Flags, CapabilitiesV104Flags, CapabilitiesV107Flags, CapabilitySet};
 use ironrdp_graphics::image_processing::PixelFormat;
 use ironrdp_graphics::pointer::DecodedPointer;
 use ironrdp_pdu::gcc::{ChannelName, ClientMonitorData, MONITOR_COUNT_MAX, Monitor, MonitorFlags};
@@ -2472,8 +2473,47 @@ fn build_connector(
     // only when it returns YUV planes. The decoder starts during the connection sequence
     // and is awaited when the graphics channel opens, so a slow start does not delay
     // connecting.
-    struct EgfxHandler;
-    impl GraphicsPipelineHandler for EgfxHandler {}
+    struct EgfxHandler {
+        /// Prefer AVC444 for the whole desktop (`RDPGFX_CAPS_FLAG_AVC_THINCLIENT`).
+        avc_thin_client: bool,
+    }
+    impl GraphicsPipelineHandler for EgfxHandler {
+        fn capabilities(&self) -> Vec<CapabilitySet> {
+            struct Defaults;
+            impl GraphicsPipelineHandler for Defaults {}
+            let sets = Defaults.capabilities();
+            if !self.avc_thin_client {
+                return sets;
+            }
+            // The flag exists from version 10.3 up; the older sets go out unchanged.
+            sets.into_iter()
+                .map(|set| match set {
+                    CapabilitySet::V10_3 { flags } => CapabilitySet::V10_3 {
+                        flags: flags | CapabilitiesV103Flags::AVC_THIN_CLIENT,
+                    },
+                    CapabilitySet::V10_4 { flags } => CapabilitySet::V10_4 {
+                        flags: flags | CapabilitiesV104Flags::AVC_THIN_CLIENT,
+                    },
+                    CapabilitySet::V10_5 { flags } => CapabilitySet::V10_5 {
+                        flags: flags | CapabilitiesV104Flags::AVC_THIN_CLIENT,
+                    },
+                    CapabilitySet::V10_6 { flags } => CapabilitySet::V10_6 {
+                        flags: flags | CapabilitiesV104Flags::AVC_THIN_CLIENT,
+                    },
+                    CapabilitySet::V10_6Err { flags } => CapabilitySet::V10_6Err {
+                        flags: flags | CapabilitiesV104Flags::AVC_THIN_CLIENT,
+                    },
+                    CapabilitySet::V10_7 { flags } => CapabilitySet::V10_7 {
+                        flags: flags | CapabilitiesV107Flags::AVC_THIN_CLIENT,
+                    },
+                    other => other,
+                })
+                .collect()
+        }
+    }
+    let egfx_handler = EgfxHandler {
+        avc_thin_client: config.channels.egfx_avc_thin_client,
+    };
 
     let h264_decoders = config
         .channels
@@ -2491,7 +2531,7 @@ fn build_connector(
             RdpInputProtocolVersion::V300,
         ))
         .with_dynamic_channel({
-            let mut egfx = GraphicsPipelineClient::new(Box::new(EgfxHandler), h264_decoder);
+            let mut egfx = GraphicsPipelineClient::new(Box::new(egfx_handler), h264_decoder);
             if let Some(decoders) = h264_decoders.cloned() {
                 egfx = egfx.with_h264_decoder_factory(Box::new(move || decoders.create()));
             }
